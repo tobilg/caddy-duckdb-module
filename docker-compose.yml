@@ -1,0 +1,72 @@
+# docker-compose.yml - Production-ready configuration
+#
+# Usage:
+#   docker-compose up -d        # Start in background
+#   docker-compose logs -f      # Follow logs
+#   docker-compose down         # Stop and remove
+#   docker-compose down -v      # Stop and remove volumes
+#
+# First-time setup (requires local ./data directory with auth.db):
+#   mkdir -p data
+#   make auth-init              # Initialize auth database in ./data/auth.db
+#   make auth-add-key ROLE=admin  # Generate API key (save it!)
+#   docker-compose up -d        # Start with docker-compose.override.yml (mounts ./data)
+#
+# For production with named volumes (no override file):
+#   docker-compose -f docker-compose.yml up -d
+#   # Then exec into container to manage auth DB, or pre-populate the volume
+#
+# Environment variables (all optional, shown with defaults):
+#   DUCKDB_PORT=8080
+#   DUCKDB_ROUTE_PREFIX=/duckdb
+#   DUCKDB_DATABASE_PATH=/data/main.db
+#   DUCKDB_AUTH_DATABASE_PATH=/data/auth.db
+#   DUCKDB_THREADS=4
+#   DUCKDB_MEMORY_LIMIT=      (not set = 80% of RAM)
+#   DUCKDB_QUERY_TIMEOUT=10s
+#   DUCKDB_ACCESS_MODE=read_write
+#   DUCKDB_MAX_ROWS_PER_PAGE=100
+#   DUCKDB_ABSOLUTE_MAX_ROWS=10000
+
+services:
+  caddy-duckdb:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: caddy-duckdb
+    ports:
+      - "${DUCKDB_PORT:-8080}:${DUCKDB_PORT:-8080}"
+    volumes:
+      - duckdb-data:/data
+    environment:
+      # Timezone
+      - TZ=UTC
+      # DuckDB settings (uncomment to override defaults)
+      # - DUCKDB_PORT=8080
+      # - DUCKDB_ROUTE_PREFIX=/duckdb
+      # - DUCKDB_DATABASE_PATH=/data/main.db
+      # - DUCKDB_AUTH_DATABASE_PATH=/data/auth.db
+      # - DUCKDB_THREADS=8
+      # - DUCKDB_MEMORY_LIMIT=4GB
+      # - DUCKDB_QUERY_TIMEOUT=30s
+      # - DUCKDB_ACCESS_MODE=read_write
+      # - DUCKDB_MAX_ROWS_PER_PAGE=100
+      # - DUCKDB_ABSOLUTE_MAX_ROWS=10000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:${DUCKDB_PORT:-8080}${DUCKDB_ROUTE_PREFIX:-/duckdb}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+volumes:
+  duckdb-data:
+    driver: local

@@ -1,0 +1,48 @@
+# Caddyfile for Docker deployment
+#
+# This configuration uses /data for all database files,
+# which should be mounted as a Docker volume for persistence.
+#
+# All settings can be overridden via environment variables.
+# Syntax: {$ENV_VAR:default_value}
+#
+# Supported environment variables:
+#   DUCKDB_PORT               - Server port (default: 8080)
+#   DUCKDB_ROUTE_PREFIX       - API route prefix (default: /duckdb)
+#   DUCKDB_DATABASE_PATH      - Main database path (default: /data/main.db)
+#   DUCKDB_AUTH_DATABASE_PATH - Auth database path (default: /data/auth.db)
+#   DUCKDB_QUERY_TIMEOUT      - Query timeout (default: 10s)
+#   DUCKDB_MAX_ROWS_PER_PAGE  - Max rows per page (default: 100)
+#   DUCKDB_ABSOLUTE_MAX_ROWS  - Safety limit for unpaginated queries (default: 10000)
+#   DUCKDB_THREADS            - Number of threads (default: 4)
+#   DUCKDB_ACCESS_MODE        - read_only or read_write (default: read_write)
+#   DUCKDB_MEMORY_LIMIT       - Memory limit e.g. "4GB" (default: not set, uses 80% RAM)
+#   DUCKDB_ENABLE_OBJECT_CACHE - Enable object cache: true/false (default: not set)
+#   DUCKDB_TEMP_DIRECTORY     - Temp directory for spilling (default: not set)
+
+:{$DUCKDB_PORT:8080} {
+	route {$DUCKDB_ROUTE_PREFIX:/duckdb}/* {
+		duckdb {
+			# Main database (stored in mounted volume)
+			database_path {$DUCKDB_DATABASE_PATH:/data/main.db}
+
+			# Auth database (stored in mounted volume)
+			auth_database_path {$DUCKDB_AUTH_DATABASE_PATH:/data/auth.db}
+
+			# Query timeout
+			query_timeout {$DUCKDB_QUERY_TIMEOUT:10s}
+
+			# Maximum rows per page
+			max_rows_per_page {$DUCKDB_MAX_ROWS_PER_PAGE:100}
+
+			# Safety limit - max rows without pagination (0 to disable)
+			absolute_max_rows {$DUCKDB_ABSOLUTE_MAX_ROWS:10000}
+
+			# Number of threads
+			threads {$DUCKDB_THREADS:4}
+
+			# Access mode: read_only or read_write
+			access_mode {$DUCKDB_ACCESS_MODE:read_write}
+		}
+	}
+}

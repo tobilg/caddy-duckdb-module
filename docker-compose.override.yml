@@ -1,0 +1,30 @@
+# docker-compose.override.yml - Development overrides
+#
+# This file is automatically loaded by docker-compose alongside docker-compose.yml
+# It provides development-friendly settings like local volume mounts.
+#
+# IMPORTANT: The auth database must be initialized before starting:
+#   mkdir -p data
+#   make auth-init                # Creates ./data/auth.db with default roles
+#   make auth-add-key ROLE=admin  # Creates an API key (save the output!)
+#   docker-compose up -d          # Starts with ./data mounted
+#
+# For production, rename or delete this file, or use:
+#   docker-compose -f docker-compose.yml up -d
+
+services:
+  caddy-duckdb:
+    # Mount local directories for development
+    # This allows managing auth DB from host with make auth-* commands
+    volumes:
+      # Local data directory - must contain initialized auth.db
+      - ./data:/data
+      # Mount Caddyfile for easy config changes without rebuild
+      - ./examples/Caddyfile:/etc/caddy/Caddyfile:ro
+    # Higher resource limits for development
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    environment:
+      - TZ=UTC

@@ -1,0 +1,61 @@
+# If you prefer the allow list template instead of the deny list, see community template:
+# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+#
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env
+
+# IDE-specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Database files
+*.db
+*.duckdb
+
+# Build artifacts (root-level binaries only)
+/caddy
+/caddyserver-duckdb-module
+
+# Test data
+/data/
+/test_data/
+
+/caddy-with-duckdb
+
+tools/create-api-key
+data/
+test-config.json
+tools/auth-db-src/auth-db
+tools/auth-db
+
+.claude/
+CLAUDE.md
+
+docs/

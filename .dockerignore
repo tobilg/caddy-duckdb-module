@@ -1,0 +1,56 @@
+# .dockerignore - Files excluded from Docker build context
+#
+# This speeds up builds and reduces image size by excluding unnecessary files
+
+# Binaries (we build fresh in the container)
+caddy
+caddy-with-duckdb
+caddyserver-duckdb-module
+tools/create-api-key
+
+# Database files
+*.db
+*.duckdb
+data/
+test_data/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in runtime image)
+docs/
+*.md
+!README.md
+
+# Development files
+.claude/
+CLAUDE.md
+TASKS.md
+Makefile
+scripts/
+
+# Test files
+*_test.go
+testdata/
+
+# Docker files (prevent recursive issues)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Temporary files
+*.tmp
+*.log
+*.out

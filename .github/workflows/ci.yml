@@ -1,0 +1,375 @@
+# CI workflow for Caddy DuckDB Module
+#
+# Runs on:
+# - Push to main branch
+# - Push to feature/* branches
+# - Pull requests to main
+# - Tags starting with 'v' (triggers release)
+#
+# Jobs:
+# - lint-and-test: Check formatting, run go vet, and run unit tests
+# - build: Matrix build for Linux, macOS, Windows (depends on lint-and-test)
+# - docker: Build and push multi-arch Docker images (depends on build)
+# - release: Create GitHub release with binaries (only on version tags)
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/*'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+env:
+  GO_VERSION: '1.24'
+  DOCKERHUB_IMAGE: tobilg/caddy-duckdb
+
+jobs:
+  lint-and-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Check formatting
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "The following files are not formatted correctly:"
+            gofmt -l .
+            echo ""
+            echo "Please run 'go fmt ./...' or 'make fmt' to fix."
+            exit 1
+          fi
+          echo "All files are properly formatted."
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Run tests with coverage
+        run: CGO_ENABLED=1 go test -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+  build:
+    name: Build (${{ matrix.os }}-${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    needs: lint-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux AMD64
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            asset_name: caddy-duckdb-linux-amd64
+            auth_db_name: auth-db-linux-amd64
+            cc: gcc
+          # Linux ARM64
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            asset_name: caddy-duckdb-linux-arm64
+            auth_db_name: auth-db-linux-arm64
+            cc: gcc
+          # macOS ARM64 (Go uses 'darwin' as GOOS)
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+            asset_name: caddy-duckdb-macos-arm64
+            auth_db_name: auth-db-macos-arm64
+            cc: clang
+          # Windows AMD64
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+            asset_name: caddy-duckdb-windows-amd64.exe
+            auth_db_name: auth-db-windows-amd64.exe
+            cc: gcc
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install build tools (Linux)
+        if: matrix.os == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Install C compiler (Windows)
+        if: matrix.os == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc
+
+      - name: Build Caddy binary (Unix)
+        if: matrix.os != 'windows'
+        env:
+          CGO_ENABLED: 1
+          CC: ${{ matrix.cc }}
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          go build -ldflags="-s -w" -o caddy ./cmd/caddy
+          ls -lh caddy
+
+      - name: Build Caddy binary (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        env:
+          CGO_ENABLED: 1
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+          $env:CC = "gcc"
+          go build -ldflags="-s -w" -o caddy.exe ./cmd/caddy
+          Get-Item caddy.exe
+
+      - name: Build auth-db tool (Unix)
+        if: matrix.os != 'windows'
+        env:
+          CGO_ENABLED: 1
+          CC: ${{ matrix.cc }}
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        run: go build -ldflags="-s -w" -o auth-db ./tools/auth-db-src/
+
+      - name: Build auth-db tool (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        env:
+          CGO_ENABLED: 1
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"
+          $env:CC = "gcc"
+          go build -ldflags="-s -w" -o auth-db.exe ./tools/auth-db-src/
+
+      - name: Verify binary (Unix)
+        if: matrix.os != 'windows'
+        run: ./caddy version || true
+
+      - name: Verify binary (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: ./caddy.exe version 2>$null; exit 0
+
+      - name: Prepare artifacts (Unix)
+        if: matrix.os != 'windows'
+        run: |
+          mkdir -p dist
+          mv caddy dist/${{ matrix.asset_name }}
+          mv auth-db dist/${{ matrix.auth_db_name }}
+
+      - name: Prepare artifacts (Windows)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Move-Item caddy.exe dist/${{ matrix.asset_name }}
+          Move-Item auth-db.exe dist/${{ matrix.auth_db_name }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/*
+
+  docker:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: build
+    # Only build Docker on main branch or tags (not PRs or feature branches)
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKERHUB_IMAGE }}
+          tags: |
+            # Set latest tag for main branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            # Set version tags for git tags (v1.0.0 -> 1.0.0)
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+            # SHA for all builds
+            type=sha,prefix=
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image
+        run: |
+          docker run --rm ${{ env.DOCKERHUB_IMAGE }}:${{ github.sha }} version || true
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [build, docker]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+
+          # Find and move all binaries to release folder
+          find artifacts -type f -name "caddy-duckdb-*" -exec mv {} release/ \;
+          find artifacts -type f -name "auth-db-*" -exec mv {} release/ \;
+
+          # List release assets
+          echo "Release assets:"
+          ls -la release/
+
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum * > checksums.txt
+          echo ""
+          echo "Checksums:"
+          cat checksums.txt
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "Generating changelog from $PREV_TAG to ${{ steps.version.outputs.VERSION }}"
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" $PREV_TAG..HEAD)
+          else
+            echo "No previous tag found, generating full changelog"
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" HEAD~10..HEAD)
+          fi
+
+          # Write release notes to file (handles multiline)
+          cat > release_notes.md << EOF
+          ## Caddy DuckDB Module ${{ steps.version.outputs.VERSION }}
+
+          ### Docker Image
+
+          \`\`\`bash
+          docker pull ${{ env.DOCKERHUB_IMAGE }}:${GITHUB_REF#refs/tags/v}
+          \`\`\`
+
+          Available for \`linux/amd64\` and \`linux/arm64\`.
+
+          ### Changes
+
+          $CHANGELOG
+
+          ### Assets
+
+          | Platform | Architecture | Binary |
+          |----------|--------------|--------|
+          | Linux | AMD64 | \`caddy-duckdb-linux-amd64\` |
+          | Linux | ARM64 | \`caddy-duckdb-linux-arm64\` |
+          | macOS | ARM64 | \`caddy-duckdb-macos-arm64\` |
+          | Windows | AMD64 | \`caddy-duckdb-windows-amd64.exe\` |
+
+          ### Checksums (SHA256)
+
+          \`\`\`
+          $(cat release/checksums.txt)
+          \`\`\`
+
+          ### Installation
+
+          **Docker (recommended):**
+          \`\`\`bash
+          docker run -p 8080:8080 -v \$(pwd)/data:/data ${{ env.DOCKERHUB_IMAGE }}:${GITHUB_REF#refs/tags/v}
+          \`\`\`
+
+          **Binary:**
+          \`\`\`bash
+          # Linux/macOS
+          chmod +x caddy-duckdb-*
+          ./caddy-duckdb-linux-amd64 version
+
+          # Windows
+          caddy-duckdb-windows-amd64.exe version
+          \`\`\`
+
+          See the [README](https://github.com/tobilg/caddyserver-duckdb-module#readme) for configuration and usage instructions.
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.version.outputs.VERSION }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.VERSION, '-') }}
+          files: |
+            release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

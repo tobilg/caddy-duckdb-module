@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "duckdb-go": {
+      "url": "https://gitmcp.io/duckdb/duckdb-go"
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ]
+    }
+  }
+}
